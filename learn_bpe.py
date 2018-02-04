@@ -24,6 +24,8 @@ from collections import defaultdict, Counter
 from io import open
 argparse.open = open
 
+DEBUG=True
+
 def create_parser():
     parser = argparse.ArgumentParser(
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -50,6 +52,14 @@ def create_parser():
         '--verbose', '-v', action="store_true",
         help="verbose mode.")
 
+    parser.add_argument(
+        '--separator', '-s', type=str, default='@@', metavar='STR',
+        help="Separator between non-final subword units (default: '%(default)s'))")
+
+    parser.add_argument(
+        '--from-prev', '-p', action="store_true",
+        help="If set, learn additional BPE pairs from an already-processed corpus")
+
     return parser
 
 def get_vocabulary(fobj, is_dict=False):
@@ -64,6 +74,24 @@ def get_vocabulary(fobj, is_dict=False):
             for word in line.split():
                 vocab[word] += 1
     return vocab
+
+def scrub_sep(token, separator):
+    return token[ : -len(separator) ]
+
+def get_vocabulary_from_prev(fobj, is_dict=False, separator):
+    """Encodes vocabulary dictionary for a corpus already processed with BPE operations.
+    """
+    vocab = Counter()
+    for line in fobj:
+        tokens = line.split()
+        i = 0
+        while i < len(tokens) - 1:
+            token = tokens[i]
+            if token.endswith(separator):
+                pair = (scrub_sep(token, separator), scrub_sep(tokens[i + 1], separator) if tokens[i+1].endswith(separator) else tokens[i + 1] + "</w>")
+                vocab[pair] += 1
+    return vocab
+
 
 def update_pair_statistics(pair, changed, stats, indices):
     """Minimally update the indices and frequency of symbol pairs
@@ -183,10 +211,24 @@ def prune_stats(stats, big_stats, threshold):
                 big_stats[item] = freq
 
 
-def main(infile, outfile, num_symbols, min_frequency=2, verbose=False, is_dict=False):
+def main(infile, outfile, num_symbols, min_frequency=2, verbose=False, is_dict=False, from_prev=False):
     """Learn num_symbols BPE operations from vocabulary, and write to outfile.
     """
+    if from_prev:
+        learn_from_prev(infile, outfile, num_symbols, min_frequency=2, verbose, is_dict)
+    else:
+        learn_from_scratch(infile, outfile, num_symbols, min_frequency=2, verbose, is_dict)
 
+def learn_from_prev(infile, outfile, num_symbols, min_frequency, verbose, is_dict):
+    """Learn num_symbols BPE operations from vocabulary of a corpus already processed
+       with BPE operations, and write to outfile.
+    """
+    outfile.write('\n')
+    sorted_vocab = sorted( get_vocabulary_from_prev(infile, is_dict).items(), key=lambda x: x[1], reverse=True)
+    learn_bpe_operations(outfile, num_symbols, min_frequency, verbose, sorted_vocab)
+    
+
+def learn_from_scratch(infile, outfile, num_symbols, min_frequency, verbose, is_dict):
     # version 0.2 changes the handling of the end-of-word token ('</w>');
     # version numbering allows bckward compatibility
     outfile.write('#version: 0.2\n')
@@ -194,6 +236,14 @@ def main(infile, outfile, num_symbols, min_frequency=2, verbose=False, is_dict=F
     vocab = get_vocabulary(infile, is_dict)
     vocab = dict([(tuple(x[:-1])+(x[-1]+'</w>',) ,y) for (x,y) in vocab.items()])
     sorted_vocab = sorted(vocab.items(), key=lambda x: x[1], reverse=True)
+    learn_bpe_operations(outfile, num_symbols, min_frequency, verbose, sorted_vocab)
+
+def learn_bpe_operations(outfile, num_symbols, min_frequency, verbose, sorted_vocab):
+    """Learn num_symbols BPE operations from vocabulary of an unprocessed corpus, and write to outfile.
+    """
+
+    if DEBUG:
+        input("About to start taking word statistics--continue?")
 
     stats, indices = get_pair_statistics(sorted_vocab)
     big_stats = copy.deepcopy(stats)
@@ -245,6 +295,9 @@ if __name__ == '__main__':
     if args.input.name != '<stdin>':
         args.input = codecs.open(args.input.name, encoding='utf-8')
     if args.output.name != '<stdout>':
-        args.output = codecs.open(args.output.name, 'w', encoding='utf-8')
+        if args.from_prev:
+            args.output = codecs.open(args.output.name, 'a', encoding='utf-8')
+        else: 
+            args.output = codecs.open(args.output.name, 'w', encoding='utf-8')
 
     main(args.input, args.output, args.symbols, args.min_frequency, args.verbose, is_dict=args.dict_input)
