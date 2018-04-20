@@ -1,31 +1,30 @@
 #! /usr/bin/env python
 from __future__ import print_function
 import sys
+import io
 from collections import Counter
 
-c = Counter()
 
 def write_vocab(instream, outstream):
-
-    if instream = sys.stdin:
-        for line in sys.stdin:
-            for word in line.split():
-                c[word] += 1
+    c = Counter()
+    if instream != sys.stdin:
+        instr = open(instream, "r", encoding="utf-8")
+        lines = instr.readlines()
     else:
-        with open(instream, "r", encoding="utf-8") as instr:
-            for line in instr.readlines():
-                for word in line.split():
-                    c[word] += 1
+        instr = instream
+        lines = instr
 
-    if outstream = sys.stdout:
-        for key,f in sorted(c.items(), key=lambda x: x[1], reverse=True):
-            print(key+" "+ str(f))
-    else:
-        with open(outstream, "w", encoding="utf-8") as out:
-            for key,f in sorted(c.items(), key=lambda x: x[1], reverse=True):
-                out.write( key + " " + str(f) + "\n" )
+    for line in lines:
+        for word in line.split():
+            c[word] += 1
+    if instr != sys.stdin: instr.close()
+
+    out = open(outstream, "w", encoding="utf-8") if outstream != sys.stdout else outstream
+    for key,f in sorted(c.items(), key=lambda x: x[1], reverse=True):
+        out.write( key + " " + str(f) + "\n" )
+    if out != sys.stdout: out.close()
 
 if __name__ == "__main__":
-    instream = sys.stdin if len(sys.argv) == 0 else sys.argv[0]
-    oustream = sys.stdout if len(sys.argv) < 2 else sys.argv[1]
-    write_vocab(instream, outstream)
+    sys.stdin = io.TextIOWrapper(sys.stdin.buffer, encoding="utf-8")
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", write_through=True, line_buffering=True)
+    write_vocab(sys.stdin, sys.stdout)
